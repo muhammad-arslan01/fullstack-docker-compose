@@ -6,17 +6,26 @@ services:
     image: postgres:15-alpine
     container_name: postgres_db
     restart: always
+# means your Postgres DB container will Restart if it crashes, Restart if your machine reboots, Restart if the Docker service restarts.
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: nestapp
     ports:
-      - "5432:5432"
+# The first 5432 = host port (your computer’s port) maps to The second 5432 = container port (the Postgres process inside the container).      
+      - "5432:5432" 
     volumes:
+# postgres_data → is a named Docker volume (declared at the bottom of your file).  
+# /var/lib/postgresql/data → is the directory inside the container where Postgres stores all of its data (databases, tables, indexes, configs, etc.).  
       - postgres_data:/var/lib/postgresql/data
     networks:
+# networks: - app-network = “Put this container on the app-network so it can communicate with other containers there by name.”    
+# No need for localhost (inside a container, localhost = itself).
       - app-network
     healthcheck:
+# CMD-SHELL tells Docker to run the following command inside a shel
+# pg_isready is a PostgreSQL utility that checks if the database server is ready to accept connections.
+# -U postgres specifies the username to check with.
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
@@ -26,10 +35,11 @@ services:
   backend:
     image: node:18-alpine
     container_name: nestjs_backend
-    working_dir: /app
+    working_dir: /app 
+# working_dir: /app = “All commands for this container should run inside /app by default.”
     restart: always
     ports:
-      - "3001:3001"
+      - "3001:3001" # leftside is the host port, right side is the container port.
     environment:
       PORT: 3001
       DB_HOST: postgres
@@ -40,12 +50,36 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+# This ensures your backend waits for Postgres to be fully ready before starting.        
     networks:
       - app-network
     volumes:
       - ./backend:/app
       - backend_node_modules:/app/node_modules
+# A      
+# ./backend → This is a folder on your own computer (outside Docker).
+# The ./ means "start looking in the same folder where the docker-compose.yml file is, 
+# Then go inside the backend folder.  
+# So → ./backend = "the backend folder that lives next to my docker-compose.yml file."
+# /app → This is a folder inside the Docker container.
+# When Docker runs, it says:
+# 👉 "Whatever files you have in ./backend on your computer, 
+# I’ll copy them inside the container at /app."
+
+# Example 
+# On your laptop: you have a file ./backend/server.js.
+# Inside the container: that file will appear at /app/server.js.
+
+# B
+# backend_node_modules → is a named volume (a special storage box created by Docker).
+
+# /app/node_modules → is just the place inside the container where the app expects to find them
+# More about this B at the end of this file.
+
     command: sh -c "npm install && npm run start:dev"
+# command = This is what the container should do when it starts.
+# sh is a very basic shell (like a command-line).
+# -c means: “Run the following string of commands.”    
 
   # React Frontend (Development mode with hot reload)
   frontend:
@@ -75,8 +109,65 @@ networks:
 # Volumes
 volumes:
   postgres_data:
-    driver: local
+    driver: local # this means On the host machine’s filesystem (/var/lib/docker/volumes/...)
   backend_node_modules:
     driver: local
   frontend_node_modules:
     driver: local
+
+
+
+#### Why needed 
+#### backend_node_modules:/app/node_modules
+
+# PART A
+# Imagine like this:
+
+# Your computer has a hard drive.
+
+# Docker containers also have their own small hard drives (temporary).
+
+# But when a container restarts, its small hard drive is usually wiped clean.
+# So… you’d lose installed stuff like node_modules.
+
+# PART B
+
+# Persistence – Your installed node_modules won’t disappear every time you restart the container.
+
+# Isolation – Keeps node_modules separate from your local machine (so your computer doesn’t get flooded with container’s packages).
+
+# Performance – Docker handles node_modules better this way (especially on Windows/Mac).
+
+
+# PART C
+# WHAT IS THIS ISOLATION, and how it is achieved?
+########################################################################################
+########################## THIS IS THE START OF THE MAIN CONCETPS ########################
+#########################################################################################
+# When you use Docker, you often do something like this in docker-compose.yml:
+
+# volumes:
+  # - ./backend:/app
+
+
+# This means:
+# 👉 "Take my local folder ./backend (on my laptop) and mount it inside the container at /app."
+
+# So, if your container has a node_modules folder and your host has an empty node_modules, the host’s empty folder overwrites the container’s one. 💥
+# That’s the problem! Your app in Docker suddenly loses all its installed packages.
+
+# 🔹 How we fix it → Isolation trick
+
+# We add another line:
+
+# - backend_node_modules:/app/node_modules
+
+
+# This says:
+# 👉 "Instead of letting host overwrite node_modules, create a special separate storage space (a Docker volume) only for /app/node_modules inside the container."
+
+
+
+#########################################################################################
+##################### THIS IS THE END OF MAIN CONCEPTS##################################
+#########################################################################################
